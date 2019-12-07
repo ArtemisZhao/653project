@@ -1,0 +1,276 @@
+---
+title: "653.11.23"
+author: "Yibo Wang, Qianhui Huang, Tongbo Xu, Sunyi Chi, Yi Zhao"
+date: "11/23/2019"
+output: pdf_document
+---
+# 0. Pre-processing
+## Log-transformation
+```{r}
+load("~/Desktop/653_project/Master_Agriculture_201804/workingdata.Rdata")
+workingdata[,c("Year")]<-workingdata[,c("Year")]-2004
+
+workingdata$time<-1
+for (i in 1:nrow(workingdata)) {
+if (workingdata$Year[i]==2){
+  workingdata$time[i]<-2
+}
+if (workingdata$Year[i]==5){
+  workingdata$time[i]<-3
+}
+if (workingdata$Year[i]==7){
+  workingdata$time[i]<-4
+}
+if (workingdata$Year[i]==11){
+  workingdata$time[i]<-5
+}}
+hist(workingdata$Total_Value_From_Crops_lastyear,main="Histogram for Total Value",xlab="Total Value from crops",ylab="Frequency",breaks=12)
+
+workingdata$ratio<-workingdata$Yuan_Spent_Raising_Crops_lastyear/
+  (workingdata$Number_of_mu_Land_Cultivated_lastyear+0.01)
+
+workingdata$logmu<-log(workingdata$Number_of_mu_Land_Cultivated_lastyear+0.1)
+workingdata$logratio<-log(workingdata$ratio+0.1)
+workingdata$Y<-log(workingdata$Total_Value_From_Crops_lastyear+0.1)
+hist(workingdata$Y,main="Histogram for Log Total Value",xlab="Total Value from crops",ylab="Frequency",breaks=12)
+names(workingdata)
+```
+
+
+## Residual Plot
+```{r}
+res<-(workingdata[,15]-predict(step.model,workingdata))
+plot(workingdata$Year,res)
+plot(workingdata$logmu,res,main="Residual value vs mu land in log ratio scale",xlab="logmu",ylab="residual")
+plot(workingdata$logratio,res,main="Residual value vs investiment each mu land ",xlab="logratio",ylab="residual")
+plot(workingdata$Year,res,main="Residual value vs year",xlab="year",ylab="residual")
+```
+
+# 2. Mean model selection
+
+```{r}
+full.model<-lm(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*CI+Year*UR+Year*logratio+logmu*UR+logmu*CI+logratio*CI+logratio*UR,data=workingdata)
+summary(full.model)
+step.model<-stepAIC(full.model,direaction="backward",trace=FALSE)
+
+reduce.model<-lm(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,data=workingdata)
+summary(reduce.model)
+#Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR
+```
+
+
+# random slope necessary
+```{r,warning=FALSE}
+library(nlme)
+Ctr<-lmeControl(maxIter=200,msMaxIter=100,tolerance = 1e-3,msTol = 1e-3,returnObject=TRUE)
+
+full<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR, random=~Year|HHid,correlation=corSymm(form=~1),data=workingdata,control=Ctr)
+
+reduce<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,random=~1|HHid,correlation=corSymm(form=~1),data=workingdata,control=Ctr)
+
+summary(full)
+summary(reduce)
+```
+
+Final decision: should include slope
+
+# 3. Variance-Covariance selection
+## (1) Unstructured
+```{r}
+var1<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,random=~Year|HHid,correlation=corSymm(form=~1),data=workingdata,control=Ctr)
+summary(var1)
+```
+
+## (2) Compound symmetry
+```{r}
+var2<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,
+            random=~Year|HHid,correlation=corCompSymm(form=~1),data=workingdata)
+summary(var2)
+```
+
+## 12 Comparison
+```{r}
+anova(var1,var2)
+```
+
+## (3) AR1
+```{r}
+var3<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,
+            random=~Year|HHid,correlation=corAR1(form=~1),data=workingdata,control =Ctr)
+summary(var3)
+anova(var1,var3)
+```
+
+## (4) Exp
+```{r}
+var4<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,
+            random=~Year|HHid,correlation=corExp(form=~1),data=workingdata)
+summary(var4)
+anova(var1,var4)
+```
+
+## (5) CAR
+```{r}
+var5<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,
+            random=~Year|HHid,correlation=corCAR1(form=~1),data=workingdata)
+summary(var5)
+anova(var1,var5)
+```
+
+# 4. Variance of Y
+```{r}
+D=matrix(c(0.12585580^2,-0.791*0.12585580*0.06898101,-0.791*0.12585580*0.06898101,0.06898101^2),nrow=2)
+Z=matrix(c(1,0,1,2,1,5,1,7,1,11),nrow=2)
+sigmasq=0.60029921^2
+rho=-0.02371288
+R<-matrix(c(1,rho,rho^2,rho^3,rho^4,rho,1,rho,rho^2,rho^3,rho^2,rho,1,rho,rho^2,rho^3,rho^2,rho,1,rho,rho^4,rho^3,rho^2,rho,1),nrow=5)
+
+R<-sigmasq*R
+vary<-t(Z)%*%D%*%Z+R
+```
+
+
+# 5. Residual plot
+Based on which we decide to delete outliers.
+
+```{r}
+hatY<-predict(var3,workingdata)
+res<-workingdata$Y-hatY
+resid<-cbind(res,workingdata$time,workingdata$Year)
+for (i in 1:5171){
+  residratio<-res/vary[c(resid[i,2]),c(resid[i,2])]
+}
+plot(x=resid[,3],y=residratio,main="Standardized Residuals vs Fitted",xlab="Fitted value",ylab="Standardized Residual",type="p")
+lines(lowess(x=resid[,3],y=residratio),col="blue")
+
+hist(residratio)
+plot(density(residratio))
+plot(hatY,residratio)
+plot(var1d)
+plot(var3,pch=5,cex=0.8,main="Standardized Residuals vs Fitted",xlab="Fitted value",ylab="Standardized")
+```
+
+# 6. Cook's Distance-- Deleting influntial points
+```{r}
+## 231203013, 521108004, 422102005
+id1<-which(workingdata$HHid=="422102005")
+id2<-which(workingdata$HHid=="231203013")
+id3<-which(workingdata$HHid=="521108004")
+datad<-workingdata[-c(id1,id2,id3),]
+
+var3d<-lme(Y~Year+logmu+logratio+CI+UR+Year*logmu+Year*logratio+logmu*CI+logratio*UR,random=~Year|HHid, correlation=corAR1(form=~1),data=datad,control=Ctr)
+summary(var3d)
+plot(var3d,pch=5,cex=0.8,main="Standardized Residuals plot after Deleting influential ",xlab="Fitted value",ylab="Standardized")
+```
+
+## 7. Plots
+```{r}
+full1<-lme(Y~Year,random=~Year|HHid,correlation=corSymm(form=~1),
+          data=datad,control=Ctr)
+reduce1<-lme(Y~Year,random=~1|HHid,correlation=corSymm(form=~1),
+            data=datad,control=Ctr)
+intf<-reduce1$coefficients$fixed
+intr<-reduce1$coefficients$random$HHid
+fullf<-full1$coefficients$fixed
+fullr<-full1$coefficients$random$HHid
+
+set.seed(2019)
+sampleid<-sample( names((which(table(datad$HHid)==5))),5)
+
+sample1<-datad[which(datad$HHid %in% sampleid),]
+
+##only random intercept
+reduceid<-which(rownames(intr) %in% sampleid)
+rint<-intf[1]+intr[reduceid]
+rslope<-intf[2]  
+
+ggplot(sample1,aes(x=Year,y=Y))+
+  geom_point(aes(col=as.factor(HHid)),size=3)+
+  labs(title="Random Intercept only Model visulization",
+       y="Value",x="Year",caption="HHid")+theme_bw()+
+  geom_abline(intercept = rint[1],slope=rslope,color="red")+
+  geom_abline(intercept = rint[2],slope=rslope,color="yellow")+
+   geom_abline(intercept = rint[3],slope=rslope,color="green")+
+   geom_abline(intercept = rint[4],slope=rslope,color="blue")+
+   geom_abline(intercept = rint[5],slope=rslope,color="purple")
+```
+
+```{r}
+## random slope
+fullid<-which(rownames(fullr) %in% sampleid)
+fullint<-fullf[1]+fullr[reduceid,1]
+fullslope<-fullf[2]+fullr[reduceid,2]  
+
+ggplot(sample1,aes(x=Year,y=Y))+
+  geom_point(aes(col=as.factor(HHid)),size=3)+
+  labs(title="Random Intercept only Model visulization",
+       y="Value",x="Year",caption="HHid")+theme_bw()+
+  geom_abline(intercept = fullint[1],slope=fullslope[1],color="red")+
+  geom_abline(intercept = fullint[2],slope=fullslope[2],color="yellow")+
+   geom_abline(intercept = fullint[3],slope=fullslope[3],color="green")+
+   geom_abline(intercept = fullint[4],slope=fullslope[4],color="blue")+
+   geom_abline(intercept = fullint[5],slope=fullslope[5],color="purple")
+  
+```
+
+```{r}
+id<-which(fullr[,2]%in% quantile(fullr[,2],c()))
+sampleid2<-rownames(fullr[which(fullr[,2]%in% quantile(fullr[,2])),])
+sample2<-datad[which(datad$HHid %in% sampleid2),]
+
+rint<-intf[1]+intr[id]
+rslope<-intf[2]  
+
+ggplot(sample2,aes(x=Year,y=Y))+
+  geom_point(aes(col=as.factor(HHid)),size=2)+
+  labs(title="Visulization for Random Intercept only",
+       y="Value",x="Year")+theme_bw()+theme(plot.title = element_text(hjust = 0.5))+
+  geom_abline(intercept = rint[1],slope=rslope,color="red")+
+  geom_abline(intercept = rint[2],slope=rslope,color='#E69F00')+
+   geom_abline(intercept = rint[3],slope=rslope,color="green")+
+   geom_abline(intercept = rint[4],slope=rslope,color="blue")+
+   geom_abline(intercept = rint[5],slope=rslope,color="purple")+
+  scale_color_manual(name="HHid",values=c("red",'#E69F00',"green","blue","purple"))
+```
+```{r}
+fullid<-which(rownames(fullr) %in% sampleid2)
+fullint<-fullf[1]+fullr[fullid,1]
+fullslope<-fullf[2]+fullr[fullid,2]  
+
+ggplot(sample2,aes(x=Year,y=Y))+
+  geom_point(aes(col=as.factor(HHid)),size=2)+
+  labs(title="Visulization for Random Intercept and Slope",
+       y="Value",x="Year")+theme_bw()+theme(plot.title = element_text(hjust = 0.5))+
+  geom_abline(intercept = fullint[1],slope=fullslope[1],color="red")+
+  geom_abline(intercept = fullint[2],slope=fullslope[2],color='#E69F00')+
+   geom_abline(intercept = fullint[3],slope=fullslope[3],color="green")+
+   geom_abline(intercept = fullint[4],slope=fullslope[4],color="blue")+
+   geom_abline(intercept = fullint[5],slope=fullslope[5],color="purple")+
+  scale_color_manual(name="HHid",values=c("red",'#E69F00',"green","blue","purple"))
+``` 
+
+```{r}
+coeff<-var3d$coefficients$fixed
+intercept1<-coeff[1]
+slope1<-coeff[3]
+intercept2<-coeff[1]+coeff[5]
+slope2<-coeff[3]+coeff[9]
+
+data <- data.frame(x=c(-3,5,-3,5),y=c(intercept1-3*slope1,slope1*5+intercept1,intercept2-3*slope2,intercept2+slope2*5),Group=c(rep("Coastal",2),rep("Inland",2))) 
+ggplot(data,aes(x=x,y=y,color=Group))+geom_line()+theme_bw()+labs(title="Mu land effects difference between CI",x="logmu",y="Log total value from crops")+
+  scale_color_manual(name="CIgroup",values=c("red","blue"))
+
+# plot(c(c(0,1),c(intercept1,slope1+intercept1)),xlab="logmu",ylab="value",type = "l")
+# abline(coef=c(intercept1,slope1),col="blue")
+```
+
+```{r}
+intercept1<-coeff[1]
+slope1<-coeff[4]
+intercept2<-coeff[1]+coeff[6]
+slope2<-coeff[4]+coeff[10]
+
+data <- data.frame(x=c(-2,10,-2,10),y=c(intercept1-2*slope1,slope1*10+intercept1,intercept2-2*slope2,intercept2+slope2*10),Group=c(rep("Rural",2),rep("Urban",2))) 
+ggplot(data,aes(x=x,y=y,color=Group))+geom_line()+theme_bw()+labs(title="Investiment effects difference between UR",x="logratio",y="Log total value from crops")+
+  scale_color_manual(name="URgroup",values=c("red","blue"))
+```
